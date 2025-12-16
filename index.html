@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laporan Perkembangan Holistik Santri - Malika Islamic Boarding School</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth;
+        let userId = 'anonymous';
+
+        // Set log level for debugging
+        setLogLevel('Debug');
+
+        /**
+         * Initialize Firebase and perform authentication.
+         */
+        window.initializeFirebase = async () => {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.error("Firebase config is missing. Using dummy data persistence.");
+                    document.getElementById('firebase-status').textContent = 'Mode Lokal (Tanpa Database Cloud)';
+                    return;
+                }
+                
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                userId = auth.currentUser?.uid || crypto.randomUUID();
+                document.getElementById('firebase-status').textContent = `Terkoneksi | ID Pengguna: ${userId.substring(0, 8)}...`;
+                window.db = db; // Make db globally available to the app logic
+                window.userId = userId;
+
+                console.log("Firebase initialized and authenticated. User ID:", userId);
+
+            } catch (error) {
+                console.error("Error during Firebase initialization or authentication:", error);
+                document.getElementById('firebase-status').textContent = 'Koneksi Gagal. Cek konsol.';
+            }
+        };
+
+        // Call initialization on load
+        window.addEventListener('load', window.initializeFirebase);
+
+        /**
+         * Saves the report data to Firestore.
+         * @param {object} reportData The complete report object.
+         * @returns {Promise<boolean>} True if successful, false otherwise.
+         */
+        window.saveReportToFirestore = async (reportData) => {
+            if (!db || !userId) {
+                console.warn("Firestore not initialized or user not authenticated. Skipping database save.");
+                return false;
+            }
+
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const collectionPath = `/artifacts/${appId}/users/${userId}/holistic_reports`;
+            
+            try {
+                // Using setDoc with a unique ID for better structure, assuming the document ID is the report ID
+                const docRef = doc(collection(db, collectionPath), reportData.reportId);
+                await setDoc(docRef, reportData);
+                console.log("Laporan berhasil disimpan di Firestore. ID:", reportData.reportId);
+                return true;
+            } catch (e) {
+                console.error("Error adding document to Firestore: ", e);
+                return false;
+            }
+        };
+
+        /**
+         * Mengirim data laporan ke Google Sheets Web App URL.
+         * @param {object} reportData The report data to send.
+         */
+        window.sendToGoogleSheet = async (reportData) => {
+            // URL yang Diberikan Pengguna
+            const GOOGLE_SHEET_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyAZWs_24SB2K86y1wrB2GZPLTvYrsx7Ip7mYvyhOhAq-BLhTjq88xX3YWBE27H1XkX/exec';
+
+            if (!GOOGLE_SHEET_WEB_APP_URL || GOOGLE_SHEET_WEB_APP_URL.includes('GANTI_DENGAN_URL')) {
+                console.warn("URL Skrip Web Google Sheet belum diatur atau salah. Melewatkan pengiriman.");
+                return;
+            }
+            
+            try {
+                const response = await fetch(GOOGLE_SHEET_WEB_APP_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // Penting untuk Web App script
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(reportData)
+                });
+
+                // Karena menggunakan 'no-cors', kita hanya bisa mengandalkan tidak adanya error jaringan.
+                console.log("Pengiriman data ke Google Sheet berhasil dikirim. Cek Google Sheet Anda.");
+
+            } catch (error) {
+                console.error("Error saat mengirim ke Google Sheet:", error);
+                // Custom modal/message box for error handling
+                showModal('Gagal Mengirim ke Google Sheet', 'Terjadi kesalahan saat mencoba mengirim data ke Google Sheet. Silakan coba lagi atau cek koneksi.', 'error');
+            }
+        };
+    </script>
+
+    <style>
+        /* Custom styles for a comfortable, modern look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        
+        :root {
+            --color-primary: #3b82f6; /* Blue 500 */
+            --color-secondary: #06b6d4; /* Cyan 500 / Tailwind Teal is great */
+            --color-background: #f8fafc; /* Slate 50 or Gray 50 */
+            --color-text: #1f2937; /* Gray 800 */
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--color-background);
+            color: var(--color-text);
+        }
+
+        /* Responsive Container */
+        .report-container {
+            max-width: 1200px;
+            padding: 1rem;
+        }
+
+        /* Custom Scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #e0e7ff; /* Indigo 100 */
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #6366f1; /* Indigo 500 */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4f46e5; /* Indigo 600 */
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- Header -->
+    <header class="bg-white shadow-md sticky top-0 z-10">
+        <div class="report-container mx-auto flex justify-between items-center py-4 px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center space-x-3">
+                <img src="https://iili.io/FsLlXA7.png" alt="Logo Malika Islamic Boarding School" class="h-10 w-10 rounded-full object-cover">
+                <h1 class="text-xl sm:text-2xl font-bold text-indigo-700">Laporan Perkembangan Holistik Santri</h1>
+            </div>
+            <span id="firebase-status" class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full hidden sm:inline-block">Memuat Database...</span>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="report-container mx-auto mt-8">
+        <div id="app-form" class="bg-white p-6 md:p-10 rounded-xl shadow-2xl border border-gray-100">
+            <h2 class="text-3xl font-extrabold text-gray-900 mb-6 border-b pb-2">Malika Islamic Boarding School</h2>
+            <p class="text-indigo-600 font-semibold mb-8">Formulir Pelaporan Perkembangan Santri</p>
+
+            <form id="report-form" onsubmit="submitReport(event)">
+                <!-- Bagian Data Pelapor -->
+                <section class="mb-8 p-4 border border-indigo-200 rounded-lg bg-indigo-50">
+                    <h3 class="text-xl font-semibold text-indigo-700 mb-4 flex items-center">
+                        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        Data Pelapor
+                    </h3>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Dropdown Pilihan Role -->
+                        <div>
+                            <label for="reporter-role" class="block text-sm font-medium text-gray-700 mb-1">Peran Pelapor</label>
+                            <select id="reporter-role" name="reporterRole" required 
+                                onchange="handleRoleChange(this.value)"
+                                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                                <option value="" disabled selected>Pilih Peran</option>
+                                <option value="Musyrif">Musyrif/Musyrifah</option>
+                                <option value="Guru Mata Pelajaran">Guru Mata Pelajaran</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Input/Dropdown Nama Pelapor -->
+                        <div>
+                            <label for="reporter-name" class="block text-sm font-medium text-gray-700 mb-1">Nama Pelapor</label>
+                            <div id="musyrif-dropdown" class="hidden">
+                                <select id="musyrif-name" name="reporterName" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                                    <option value="" disabled selected>Pilih Musyrif/Musyrifah</option>
+                                    <!-- Options will be populated by JS -->
+                                </select>
+                            </div>
+                            <div id="guru-input" class="hidden">
+                                <input type="text" id="guru-name" name="reporterNameText" placeholder="Ketik Nama Guru Mata Pelajaran"
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Bagian Data Santri -->
+                <section class="mb-8 p-4 border border-sky-200 rounded-lg bg-sky-50">
+                    <h3 class="text-xl font-semibold text-sky-700 mb-4 flex items-center">
+                        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
+                        Data Santri
+                    </h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Dropdown Pilihan Kelas -->
+                        <div>
+                            <label for="class-select" class="block text-sm font-medium text-gray-700 mb-1">Pilih Kelas</label>
+                            <select id="class-select" name="class" required onchange="handleClassChange(this.value)"
+                                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-sky-500 focus:border-sky-500 transition duration-150">
+                                <option value="" disabled selected>Pilih Kelas Santri</option>
+                                <!-- Options will be populated by JS -->
+                            </select>
+                        </div>
+
+                        <!-- Dropdown Pilihan Santri -->
+                        <div>
+                            <label for="santri-select" class="block text-sm font-medium text-gray-700 mb-1">Pilih Nama Santri</label>
+                            <select id="santri-select" name="studentName" required 
+                                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-sky-500 focus:border-sky-500 transition duration-150" disabled>
+                                <option value="" disabled selected>Pilih Santri (Pilih Kelas Dulu)</option>
+                                <!-- Options will be populated by JS -->
+                            </select>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- Bagian Pertanyaan Bebas -->
+                <section class="mb-8 p-6 border border-gray-300 rounded-lg bg-white shadow-inner">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4 border-b pb-2">
+                        <svg class="w-6 h-6 mr-2 inline-block text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M16 12h1m-1.636 4.364l.707.707M12 20h.01M6.364 17.636L5.657 16.93M6 12H5m1.636-4.364l-.707-.707M12 4v.01M16 4h.01M17 19h.01M12 18h.01M10 12h.01M7 12h.01"></path></svg>
+                        Pertanyaan Bebas (Analisis Kualitatif)
+                    </h3>
+                    
+                    <!-- HAL BAIK / POSITIF KUAT YANG DIMILIKI -->
+                    <div class="mb-5">
+                        <label for="positif" class="block text-sm font-semibold text-gray-700 mb-2">
+                            HAL BAIK / POSITIF KUAT YANG DIMILIKI
+                            <span class="block font-normal text-xs text-gray-500 mt-1">
+                                Menurut Anda apa hal positif, hal perubahan baik, atau hal baik yang bersangkutan miliki? Sebutkan minimal dua!
+                            </span>
+                        </label>
+                        <textarea id="positif" name="halPositif" rows="4" required placeholder="Tuliskan di sini..."
+                            class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"></textarea>
+                    </div>
+
+                    <!-- KEKURANGAN / KEBIASAN YANG HARUS DIPERBAIKI -->
+                    <div>
+                        <label for="kekurangan" class="block text-sm font-semibold text-gray-700 mb-2">
+                            KEKURANGAN / KEBIASAN YANG HARUS DIPERBAIKI
+                            <span class="block font-normal text-xs text-gray-500 mt-1">
+                                Menurut Anda hal apa yang harus diperbaiki agar yang bersangkutan jauh lebih baik? Sebutkan minimal satu!
+                            </span>
+                        </label>
+                        <textarea id="kekurangan" name="kekurangan" rows="4" required placeholder="Tuliskan di sini..."
+                            class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"></textarea>
+                    </div>
+                </section>
+
+                <!-- Bagian Poin Perkembangan (Dropdowns) -->
+                <section id="poin-perkembangan" class="space-y-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4 border-b pb-2">
+                        <svg class="w-6 h-6 mr-2 inline-block text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/24 24/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        Poin Perkembangan (Penilaian Kuantitatif)
+                    </h3>
+                    <!-- Poin pertanyaan akan di-generate oleh JS -->
+                </section>
+
+                <!-- Tombol Submit -->
+                <div class="mt-10 pt-6 border-t border-gray-200">
+                    <button type="submit" id="submit-button"
+                        class="w-full sm:w-auto px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition duration-300 transform hover:scale-[1.01] flex justify-center items-center"
+                        disabled>
+                        <svg id="loading-spinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Kirim Laporan
+                    </button>
+                    <p id="submission-message" class="mt-4 text-sm text-center text-red-600 hidden"></p>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <!-- Modal for Messages -->
+    <div id="modal-container" class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden items-center justify-center p-4" onclick="closeModal()">
+        <div id="modal-content" class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full transform transition-all duration-300 scale-95" onclick="event.stopPropagation()">
+            <h4 id="modal-title" class="text-xl font-bold mb-3 text-gray-800"></h4>
+            <p id="modal-body" class="text-gray-600 mb-4"></p>
+            <div class="flex justify-end">
+                <button onclick="closeModal()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === DATA APLIKASI ===
+        const MUSYRIFS = [
+            "Ust. Arynal Purnama Dakka", "Ust. Muhammad Fikri Izzul Haq", "Ust. Lufi Yahya", "Ust. Muhammad Muchlis",
+            "Ust. Muhammad Fauzan Rabbani", "Ust. M Azka Maula Syakur, Lc", "Sayyidah Qonita Nafisah", "Sayyidah Nurul Azmi",
+            "Sayyidah Alya Islahu", "Sayyidah Sausan Thahira", "Sayyidah Melati", "Sayyidah Syarifah Afifah, S.Hum"
+        ];
+
+        const STUDENTS_BY_CLASS = {
+            "Kelas 7 A Putra": [
+                "Athariz Chalief Saputra", "Ahmad Khomaini", "Al Athar Ghaizan Nobel", "Alzabar Akbar", "Arya Devano",
+                "Abyan Dzaky Hafizh Kurniawan", "Fadil Syafif Nugroho Sukri", "Fakhri Muhammad Mumtaz",
+                "I Komang Raditiya Novian Pradana Putra", "Ibad Najwan", "Ibni Shidqie Al Mumtazhar",
+                "Kenzie Dastan Shalahuddin Zan", "Khaerul A'Zam Ismail", "Khairiy Rezki Adhinata", "Lionel Pratama Nugroho",
+                "Mahfidz Ardiansyah", "Mohamad Akromul Azam", "Mohammad Ezra Rafiandhika", "Muhammad Akhtar Al Hisyam",
+                "Muhammad Al Fatih", "Muhammad Fatir Albahri", "Muhammad Naufal Rizki", "Muhammad Syamil At Tsauri",
+                "Nauval Abdul Rasyid", "Pranatantra Fachrie", "Rajata Ibnu Faqih", "Reygi Antajun Hikaru",
+                "Rifqi Irfan Hamizan", "Umar Al Jailaani", "Yossa Dzulfi Andrean", "Zahran Sahil",
+                "Rizky Setyo Nugroho", "Teuku Rizqi Mutha"
+            ],
+            "Kelas 7 B Putra": [
+                "Abidzar Nuha Wafi", "Ach. Raihan Faiz As-Sudaisyi", "Ahmad Nazmu Durori", "Akbar Nurfatah Arsadi",
+                "Akhdan Athaya Putra Zulfikar", "Al Barra Ananta Putra", "Annabighoh Syabanu Gunawan",
+                "Arrais Mahardika Rusli", "Athaya Kaysan Hakim", "Aufa Gilang Pratama", "Bilal Abdul Aslam",
+                "Bintang Dasilva Ibrahim", "Brilliant Alziddan Mustofa", "Denny Maulana Yusuf",
+                "Fathir Muhammad Fadhilah", "Haikal Ahfwan", "Harry Harsya Shiddiq", "Ifan Sofyan",
+                "Kenzie Adelio Tristan", "Khairul Walif", "Luthfirrahman Nafis Hananto",
+                "Muhammad Al-Gaza Putra Dewian", "Muhammad Arafa Ekiyano Febrian", "Muhammad Dilfa Fattan",
+                "Muhammad Fahriansyah", "Muhammad Fathan Toriq", "Muhammad Haikal Al Faisya", "Muhammad Najetullah",
+                "Muhammad Raditya Fauzan", "Muhammad Waldan", "Rayhan Faiz Abdillah Hadiyanto", "Sultan Fatih Setiawan",
+                "Zhafran Tata Hidayat"
+            ],
+            "Kelas 7 A Putri": [
+                "Adara Riyanti", "Aghniya Musamma Harahap", "Ahla Amany Maulidya", "Alivia Zahratukanza",
+                "Alya Ruby Salimah", "Ameera Syahida Ajie", "Asyifa Mahira Lubis", "Bilqis Ghaisani Ahza",
+                "Callysta Lareina Nabiha", "Cordelia Krisna Widyantari", "Deyanna Abigail Baligha Zephania",
+                "Fathya Caliana", "Filzah Ghaisani Fikriyah", "Indhieswara Maharani", "Kanaya Athalla Dzakiyyah",
+                "Kawa'Iba Puti Firmansyah", "Keisha Sahila Az Zahra", "Khansa Ghina Rachmani",
+                "Mehira Mehrnaz Multazam", "Nadiya Fajria Salsabila", "Novilly Azwan", "Putri Mutia Rahmi",
+                "Queenisa Yumna Zahirah", "Rita Madinatul Arofah", "Saffanah Saafia Zahirah",
+                "Shelby Sinar Islamadina", "Shira Rizkia Adara", "Siti Shofa Aulia Rahman", "Syifa Anindya",
+                "Talita Himayatul Kamilah", "Talita Khansa Saputra", "Yukqiu Natasha Ardi", "Zivana Lay"
+            ],
+            "Kelas 7 B Putri": [
+                "Aesha Bellvania Kirana", "Aira Fitriani Azzahra", "Aisyah Fahira Husna", "Alya Zahra Nabila",
+                "Ameera Isnain Setiadi", "Aulia Zahra Ibrahim", "Azizahtun Nazwa", "Ghina Bilqis Shabreen",
+                "Hafizhah Alimah", "Haninda Aulia Dayana", "Hilma Arifa Aulia Rosid", "Jihan Amira Karim",
+                "Keyla Khanza Ramadhani", "Nafisa Al Mahira", "Nailatisya Aquina Salsabilla",
+                "Nilam Maulina Anggraini", "R A Najeela Putri Widiarsa", "Rhaqueena Aleameccha Alingga",
+                "Salsabila Zovanka", "Shakila Aulia Sakhiy", "Shifa Mumtazah", "Siti Alifia Zahra",
+                "Siti Zahwa Naura Auni", "Siti Ziarra Nur Al-Jaelani", "Syafa Savira", "Syakilah Putri Oktavia",
+                "Syakirah Rizqia Ramadani", "Tuhfatun Najwa", "Vinca Fitranavira Putri", "Zhafira Nur Azzahra",
+                "Tiara Izzatunnisa", "Kinara Rahmadania", "Muthiah Lathifah Azzahra", "Avikah Rosafitri"
+            ],
+            "Kelas 10 Putra": [
+                "Adhwa Arsya Gatfan", "Afa Zaidan Putra Tamba", "Ahmad Rafli Dhani Muzakki", "Akmal Ihsan Huwaidi",
+                "Albisna Zinata Ababil", "Asyraf Fairuz Mumtaz", "Attiq Muzaki Ibrahim", "Bayanaca Qotthon Elbarca",
+                "Bazyli Rafif Azka", "Charli Andestian", "Danendra Apta Kayana", "Dhafinzha Muhammad Fakhri",
+                "Fasabbi Haqiqie Pramada Rozak", "Irsyad Haitami Fajrin", "Mikail Abdul Majid",
+                "Mochammad Alfath Dhafin", "Muaimar Ghadafi M. Asri", "Muhamad Fairuz Azmi",
+                "Muhamad Rafka Alvaro", "Muhammad Adil Shidqi", "Muhammad Agla Alfathur Rahman",
+                "Muhammad Ammar Muzakki", "Muhammad Azmi", "Muhammad Fahri Alfarizi", "Muhammad Fahri Rosadi",
+                "Muhammad Suryo Nugra Putra Anwar", "Nawwaf Bilza Pakpahan", "Raditya Bustanul Tamam",
+                "Raihan Ramadhan", "Salim Al Habsyi", "Sayyid Aqil Sakhiy Wahyudi",
+                "Yudha Pratama Nurwicaksana Nasution"
+            ],
+            "Kelas 10 Putri": [
+                "Alfina Dhiya Ulhaq", "Amelinda Nur Febrina", "Amira Azzarine", "Anjeli Ghenia Asmedi",
+                "Aulia Zahra Nursakinah", "Callysta Zhahira", "Citra Aulia Saputra", "Egidhea Sakha Gendis",
+                "Faiha Ulayya", "Kanaya Azzalea Maulida", "Kayla Putri Azzahra", "Kesya Anastasya Putri",
+                "Keysha Hana Alzena", "Khansa Avicenna", "Maia Dina Islamiy Sobariah", "Nailah Saffanah Rizqin",
+                "Najwa Althafunisa", "Nasya Adya Mustafidah", "Raihana Radwa Fahira", "Ratu Syahlina Samlawi",
+                "Siti Aulia Rahma", "Syifa Az Zahra", "Tia Anggrianti", "Ussy Elsinasari",
+                "Vicky Fadilah Luthfiyana", "Virly Evelyn Dean Zahra", "Wildatul Hasanah", "Yolanda Febriani",
+                "Yuha Rizqiyatul Muyassaroh", "Zahiratul Aisyi", "Zulfa Nurul Fauziah"
+            ]
+        };
+        
+        const POIN_QUESTIONS = [
+            {
+                id: "ibadahHarian",
+                question: "Bagaimana perkembangan ibadah harian ybs selama 1 semester ini?",
+                options: [
+                    "Mulai memiliki kesadaran pribadi dalam menjalankan ibadah tanpa perlu diingatkan.",
+                    "Terlihat adanya kemajuan dalam menjaga ibadah secara bertahap.",
+                    "Pelaksanaan ibadah wajib dan sunnah sangat baik, selalu konsisten tidak pernah telat",
+                    "Mulai merasa nyaman dan menyadari pentingnya beribadah",
+                    "Perkembangan kesadaran ibadah harian berjalan ke arah yang positif.",
+                    "Adab dan sikap saat beribadah mengalami perkembangan yang baik",
+                    "Kesadaran penuh dalam melaksanakan puasa senin kamis secara istiqomah",
+                    "Konsistensi ibadah harian masih dalam proses pembiasaan.",
+                    "Ritme ibadah harian masih terus diarahkan",
+                    "Masih memerlukan pendampingan dalam menjaga keteraturan ibadah",
+                    "Kesadaran terhadap ibadah harian masih perlu diperkuat."
+                ]
+            },
+            {
+                id: "sikapDisiplin",
+                question: "Bagaimana perkembangan sikap dan disiplin santri?",
+                options: [
+                    "Cukup disiplin, namun masih perlu diingatkan terkait manajemen waktu antara istirahat dan dan aktivitas",
+                    "Santri yang konsisten dalam menjalankan tata tertib. Sering menjadi contoh positif bagi teman-temannya dalam hal disiplin",
+                    "Menunjukkan proses pembiasaan yang semakin baik dalam menjaga sikap dan disiplin.",
+                    "Sikap keseharian mengalami perkembangan yang lebih stabil.",
+                    "Menunjukkan progres yang baik dalam menjaga sikap dan aturan.",
+                    "Disiplin tumbuh seiring bertambahnya pemahaman dan kebiasaan.",
+                    "Sering mendapat teguran ringan terkait kerapian",
+                    "Sering mendapatkan teguran ringan terkait kebersihan",
+                    "Sikap dan kedisiplinan masih memerlukan pendampingan berkelanjutan.",
+                    "Konsistensi dalam mengikuti aturan belum sepenuhnya stabil.",
+                    "Proses pembiasaan sikap tertib masih terus berjalan.",
+                    "Masih membutuhkan penguatan dalam menjaga kedisiplinan.",
+                    "Pembinaan masih terus diarahkan pada penguatan disiplin, sikap dan tanggung jawab."
+                ]
+            },
+            {
+                id: "interaksiSosial",
+                question: "Bagaimana perkembangan interaksi sosial dan kepemimpinan ybs?",
+                options: [
+                    "Supel dan pandai bergaul dengan teman, Mampu beradaptasi dengan baik dengan siapapun",
+                    "Memiliki jiwa kepemimpinan yang menonjol. Mampu menginisiasi dan mengorganisir kegiatan bersama dengan efektif",
+                    "Dikenal memiliki empati dan kepedulian sosial yang tinggi, seperti peduli dengan teman",
+                    "Memiliki pengaruh positif terhadap teman-temannya.",
+                    "Mampu berkomunikasi dengan santun dan efektif kepada guru, musyrif, dan teman",
+                    "Sangat menghormati perbedaan teman lain",
+                    "Semakin terbuka dalam pertemanan walau Interaksi sosial masih memerlukan pendampingan",
+                    "Proses adaptasi dengan lingkungan sosial masih berlangsung.",
+                    "Masih belajar dalam membangun komunikasi yang efektif"
+                ]
+            },
+            {
+                id: "prestasiNonAkademik",
+                question: "Bagaimana perkembangan ybs dalam bidang non akademik?",
+                options: [
+                    "Menunjukkan ketertarikan dan keterlibatan yang semakin baik pada kegiatan Muhadhoroh",
+                    "Menunjukkan bakat di bidang olahraga. Aktif dan antusias mengikuti latihan",
+                    "Meraih prestasi Juara Lomba Pidato.",
+                    "Bakat dan minat sangat menonjol di bidang seni",
+                    "Bakat dan minat sangat menonjol di bidang bahasa",
+                    "Berpartisipasi aktif dalam kegiatan Muhadharah. Memiliki potensi besar di bidang public speaking",
+                    "Menjadi bagian dari Juara 1 Kamar Terbersih.",
+                    "Memiliki kemampuan menulis atau jurnalistik yang baik",
+                    "Memiliki antusiasme tinggi pada pengembangan bakat di bidang seni gambar",
+                    "Berpartisipasi aktif dalam kegiatan olahraga",
+                    "Berpartisipasi aktif dalam berbagai kegiatan diluar kelas",
+                    "Mulai menemukan kenyamanan dalam kegiatan olahraga basket yang diikuti.",
+                    "Perkembangan keterampilan hadroh menunjukkan arah yang menggembirakan.",
+                    "Partisipasi bidang olahraga memerlukan penguatan.",
+                    "Keterlibatan dalam kegiatan non akademik belum konsisten.",
+                    "Pengembangan potensi non akademik berjalan secara bertahap.",
+                    "Masih membutuhkan dorongan untuk aktif dalam kegiatan non akademik.",
+                    "Proses menemukan minat dan bakat masih berjalan."
+                ]
+            }
+        ];
+
+        // === FUNGSI UTAMA ===
+
+        /**
+         * Mengisi dropdown Poin Perkembangan ke dalam DOM.
+         */
+        function populatePoinQuestions() {
+            const container = document.getElementById('poin-perkembangan');
+            let html = container.innerHTML; // Keep the title
+            
+            POIN_QUESTIONS.forEach(poin => {
+                const customInputId = `${poin.id}Custom`;
+                
+                html += `
+                <div class="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                    <label for="${poin.id}" class="block text-sm font-semibold text-gray-700 mb-2">
+                        ${poin.question}
+                    </label>
+                    <select id="${poin.id}" name="${poin.id}" required 
+                        onchange="handlePoinChange('${poin.id}', this.value)"
+                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 transition duration-150 mb-3">
+                        <option value="" disabled selected>Pilih salah satu jawaban...</option>
+                        ${poin.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                        <option value="Jawaban Lain">--- Jawaban Lain (Input Sendiri) ---</option>
+                    </select>
+                    
+                    <div id="${customInputId}Container" class="hidden">
+                        <input type="text" id="${customInputId}" name="${customInputId}" 
+                            placeholder="Ketik Jawaban Anda Sendiri"
+                            class="w-full p-3 border border-yellow-500 rounded-lg bg-yellow-50 focus:ring-yellow-500 focus:border-yellow-500 transition duration-150" disabled>
+                    </div>
+                </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        /**
+         * Mengisi dropdown kelas dan musyrif.
+         */
+        function populateInitialData() {
+            // Populate Musyrif Dropdown
+            const musyrifSelect = document.getElementById('musyrif-name');
+            MUSYRIFS.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                musyrifSelect.appendChild(option);
+            });
+
+            // Populate Class Dropdown
+            const classSelect = document.getElementById('class-select');
+            Object.keys(STUDENTS_BY_CLASS).forEach(className => {
+                const option = document.createElement('option');
+                option.value = className;
+                option.textContent = className;
+                classSelect.appendChild(option);
+            });
+            
+            // Populate Poin Questions
+            populatePoinQuestions();
+            
+            // Enable submit button after data load (assuming Firebase is fast or in progress)
+            document.getElementById('submit-button').disabled = false;
+        }
+
+        /**
+         * Mengganti opsi nama santri berdasarkan kelas yang dipilih.
+         * @param {string} className Nama kelas yang dipilih.
+         */
+        function handleClassChange(className) {
+            const santriSelect = document.getElementById('santri-select');
+            santriSelect.innerHTML = '<option value="" disabled selected>Pilih Nama Santri</option>';
+            santriSelect.disabled = false;
+            santriSelect.classList.remove('opacity-50');
+
+            if (STUDENTS_BY_CLASS[className]) {
+                STUDENTS_BY_CLASS[className].forEach(studentName => {
+                    const option = document.createElement('option');
+                    option.value = studentName;
+                    option.textContent = studentName;
+                    santriSelect.appendChild(option);
+                });
+            }
+        }
+        
+        /**
+         * Menampilkan atau menyembunyikan input nama guru/musyrif.
+         * @param {string} role Peran yang dipilih (Musyrif atau Guru Mata Pelajaran).
+         */
+        function handleRoleChange(role) {
+            const musyrifDiv = document.getElementById('musyrif-dropdown');
+            const guruDiv = document.getElementById('guru-input');
+            const musyrifInput = document.getElementById('musyrif-name');
+            const guruInput = document.getElementById('guru-name');
+
+            if (role === 'Musyrif') {
+                musyrifDiv.classList.remove('hidden');
+                guruDiv.classList.add('hidden');
+                musyrifInput.required = true;
+                guruInput.required = false;
+                guruInput.value = ''; // Clear guru name if switching
+            } else if (role === 'Guru Mata Pelajaran') {
+                musyrifDiv.classList.add('hidden');
+                guruDiv.classList.remove('hidden');
+                musyrifInput.required = false;
+                guruInput.required = true;
+                musyrifInput.value = ''; // Clear musyrif name if switching
+            } else {
+                musyrifDiv.classList.add('hidden');
+                guruDiv.classList.add('hidden');
+                musyrifInput.required = false;
+                guruInput.required = false;
+            }
+        }
+        
+        /**
+         * Menampilkan atau menyembunyikan input custom jawaban.
+         * @param {string} poinId ID poin pertanyaan.
+         * @param {string} value Nilai yang dipilih dari dropdown.
+         */
+        function handlePoinChange(poinId, value) {
+            const customInputContainer = document.getElementById(`${poinId}CustomContainer`);
+            const customInput = document.getElementById(`${poinId}Custom`);
+            
+            if (value === 'Jawaban Lain') {
+                customInputContainer.classList.remove('hidden');
+                customInput.disabled = false;
+                customInput.required = true;
+                customInput.focus();
+            } else {
+                customInputContainer.classList.add('hidden');
+                customInput.disabled = true;
+                customInput.required = false;
+                customInput.value = ''; // Clear value when hidden
+            }
+        }
+
+        /**
+         * Mengirimkan laporan setelah tombol submit ditekan.
+         * @param {Event} event 
+         */
+        async function submitReport(event) {
+            event.preventDefault();
+            
+            const button = document.getElementById('submit-button');
+            const spinner = document.getElementById('loading-spinner');
+            const form = event.target;
+
+            button.disabled = true;
+            spinner.classList.remove('hidden');
+            document.getElementById('submission-message').classList.add('hidden');
+
+            // 1. Kumpulkan Data Formulir
+            const formData = new FormData(form);
+            const reportData = {
+                reportId: `report-${Date.now()}-${(Math.random() * 1000).toFixed(0)}`,
+                timestamp: new Date().toISOString(),
+                // Data Pelapor dan Santri
+                reporterRole: formData.get('reporterRole'),
+                reporterName: formData.get('reporterRole') === 'Musyrif' ? formData.get('musyrifName') : formData.get('reporterNameText'),
+                class: formData.get('class'),
+                studentName: formData.get('studentName'),
+                // Pertanyaan Bebas
+                halPositif: formData.get('halPositif'),
+                kekurangan: formData.get('kekurangan'),
+            };
+
+            // 2. Kumpulkan Jawaban Poin dan Custom
+            POIN_QUESTIONS.forEach(poin => {
+                const selectedValue = formData.get(poin.id);
+                const customValue = formData.get(`${poin.id}Custom`);
+
+                if (selectedValue === 'Jawaban Lain' && customValue) {
+                    reportData[poin.id] = customValue + " (Jawaban Lain)";
+                } else {
+                    reportData[poin.id] = selectedValue;
+                }
+            });
+            
+            let success = true;
+
+            // 3. Simpan ke Firestore
+            const firestoreSuccess = await window.saveReportToFirestore(reportData);
+            if (!firestoreSuccess) {
+                // If firestore fails, we still try to send to Google Sheet
+                success = false;
+            }
+
+            // 4. Kirim ke Google Sheet
+            await window.sendToGoogleSheet(reportData);
+            
+            // 5. Feedback dan Reset
+            if (success) {
+                showModal('Laporan Berhasil!', `Laporan perkembangan untuk santri ${reportData.studentName} telah berhasil dikirim dan disimpan.`, 'success');
+                form.reset();
+                handleRoleChange(''); // Reset role display
+                handleClassChange(''); // Reset class/santri
+                // Manually reset custom fields visibility
+                POIN_QUESTIONS.forEach(poin => handlePoinChange(poin.id, '')); 
+            } else {
+                showModal('Peringatan!', 'Laporan telah dikirim ke Google Sheet, tetapi GAGAL disimpan ke database Cloud. Cek koneksi Anda.', 'warning');
+            }
+
+            // Reset button state
+            spinner.classList.add('hidden');
+            button.disabled = false;
+        }
+
+        /**
+         * Menampilkan modal pesan.
+         */
+        function showModal(title, message, type = 'info') {
+            const container = document.getElementById('modal-container');
+            const titleEl = document.getElementById('modal-title');
+            const bodyEl = document.getElementById('modal-body');
+            const contentEl = document.getElementById('modal-content');
+
+            // Set content
+            titleEl.textContent = title;
+            bodyEl.textContent = message;
+
+            // Apply type-based styling
+            titleEl.className = 'text-xl font-bold mb-3';
+            if (type === 'success') {
+                titleEl.classList.add('text-green-600');
+            } else if (type === 'error' || type === 'warning') {
+                titleEl.classList.add('text-red-600');
+            } else {
+                titleEl.classList.add('text-indigo-600');
+            }
+            
+            // Show modal
+            container.classList.remove('hidden');
+            container.classList.add('flex');
+            contentEl.classList.add('scale-100');
+            contentEl.classList.remove('scale-95');
+        }
+
+        /**
+         * Menutup modal pesan.
+         */
+        function closeModal() {
+            const container = document.getElementById('modal-container');
+            const contentEl = document.getElementById('modal-content');
+
+            contentEl.classList.remove('scale-100');
+            contentEl.classList.add('scale-95');
+            setTimeout(() => {
+                container.classList.add('hidden');
+                container.classList.remove('flex');
+            }, 300);
+        }
+
+
+        // === INISIALISASI PADA SAAT LOAD ===
+        window.addEventListener('load', populateInitialData);
+    </script>
+</body>
+</html>
